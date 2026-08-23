@@ -1,5 +1,6 @@
 import mongoose from 'mongoose'
 import bcrypt from 'bcryptjs'
+import { fileURLToPath } from 'node:url'
 import { Area, Business, Category, Conversation, CustomerRequest, Match, Message, Notification, ProductService, Promotion, Quotation, Review, User } from './models.js'
 import { keywordsFrom, matchRequest } from './matching.js'
 
@@ -16,8 +17,8 @@ const photos = {
   tech: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1200&q=80',
 }
 
-async function seed() {
-  await mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/bizzorix')
+export async function seedDatabase({ connect = true, disconnect = true } = {}) {
+  if (connect) await mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/bizzorix')
   await Promise.all(Object.values(mongoose.models).map((entry) => entry.deleteMany({})))
   await Category.insertMany(categoryNames.map((name, order) => ({ name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), order })))
   await Area.insertMany(areaNames.map((name, order) => ({ name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), order })))
@@ -74,7 +75,8 @@ async function seed() {
   await Notification.insertMany([{ userId: customer.id, type: 'quotation', title: 'New quotation received', body: 'Alagbaka Cakes & Treats sent you an offer.', link: `/requests/${requests[0].id}/offers` }, { userId: businessUser.id, type: 'match', title: 'New matched request', body: 'A customer in Alagbaka needs a birthday cake.', link: '/business-dashboard/requests' }])
   console.log('BizZorix demo data seeded successfully.')
   console.log('Demo password for all accounts: Demo1234!')
-  await mongoose.disconnect()
+  if (disconnect) await mongoose.disconnect()
 }
 
-seed().catch((error) => { console.error(error); process.exit(1) })
+const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
+if (isDirectRun) seedDatabase().catch((error) => { console.error(error); process.exit(1) })

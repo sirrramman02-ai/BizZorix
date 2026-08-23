@@ -11,7 +11,9 @@ export function setAuthCookie(res, user) {
 export async function requireAuth(req, res, next) {
   try {
     const payload = jwt.verify(req.cookies.bizzorix_session, secret())
-    req.user = await User.findById(payload.sub)
+    req.user = globalThis.__bizzorixFallbackUsers
+      ? globalThis.__bizzorixFallbackUsers.get(payload.sub)
+      : await User.findById(payload.sub)
     if (!req.user || req.user.status !== 'active') throw new Error('Invalid session')
     next()
   } catch {
@@ -21,4 +23,4 @@ export async function requireAuth(req, res, next) {
 
 export const allowRoles = (...roles) => (req, res, next) => roles.includes(req.user.role) ? next() : res.status(403).json({ success: false, error: { message: 'You do not have permission to do that.' } })
 
-export const safeUser = (user) => ({ id: user.id, fullName: user.fullName, email: user.email, optionalPhone: user.optionalPhone, preferredArea: user.preferredArea, role: user.role })
+export const safeUser = (user) => ({ id: user.id || user._id, fullName: user.fullName, email: user.email, optionalPhone: user.optionalPhone, preferredArea: user.preferredArea, role: user.role })

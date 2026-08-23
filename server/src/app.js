@@ -4,14 +4,26 @@ import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import rateLimit from 'express-rate-limit'
 import bcrypt from 'bcryptjs'
+import { randomInt } from 'node:crypto'
 import { z } from 'zod'
 import { allowRoles, requireAuth, safeUser, setAuthCookie } from './auth.js'
-import { Area, Business, Category, Conversation, CustomerRequest, Flag, Match, Message, Notification, ProductService, Promotion, Quotation, Review, SavedBusiness, User } from './models.js'
+import { Area, Business, Category, Conversation, CustomerRequest, DeliveryRequest, Flag, Match, Message, Notification, ProductOrder, ProductService, Promotion, Quotation, Review, SavedBusiness, User } from './models.js'
 import { keywordsFrom, matchRequest } from './matching.js'
 
 export const app = express()
 app.use(helmet({ crossOriginResourcePolicy: false }))
-app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }))
+const allowedOrigins = new Set([
+  process.env.CLIENT_URL || 'http://localhost:5173',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+])
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.has(origin)) return callback(null, true)
+    return callback(new Error('This website address is not allowed to use the BizZorix API.'))
+  },
+  credentials: true,
+}))
 app.use(express.json({ limit: '2mb' }))
 app.use(cookieParser())
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, limit: 80 }))
@@ -28,15 +40,25 @@ app.post('/api/auth/register/:type', asyncRoute(async (req, res) => {
   const parsed = registerSchema.safeParse(req.body)
   if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message)
   if (!['customer', 'business'].includes(req.params.type)) return fail(res, 400, 'Invalid account type.')
-  if (await User.exists({ email: parsed.data.email.toLowerCase() })) return fail(res, 409, 'An account with this email already exists.')
-  const user = await User.create({ fullName: parsed.data.fullName, email: parsed.data.email, passwordHash: await bcrypt.hash(parsed.data.password, 12), optionalPhone: parsed.data.phone, preferredArea: parsed.data.preferredArea || parsed.data.area, role: req.params.type })
-  if (user.role === 'business') await Business.create({ ownerId: user.id, name: parsed.data.businessName || `${user.fullName}'s Business`, slug: `${(parsed.data.businessName || user.fullName).toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now().toString().slice(-4)}`, mainCategory: parsed.data.category || 'Other', publicPhone: parsed.data.phone, area: parsed.data.area, serviceAreas: [parsed.data.area].filter(Boolean), serviceTags: [] })
+  const email = parsed.data.email.toLowerCase()
+  if (globalThis.__bizzorixFallbackUsers) {
+    if ([...globalThis.__bizzorixFallbackUsers.values()].some((entry) => entry.email === email)) return fail(res, 409, 'An account with this email already exists.')
+  } else if (await User.exists({ email })) return fail(res, 409, 'An account with this email already exists.')
+  const values = { fullName: parsed.data.fullName, email, passwordHash: await bcrypt.hash(parsed.data.password, 12), optionalPhone: parsed.data.phone, preferredArea: parsed.data.preferredArea || parsed.data.area, role: req.params.type, status: 'active' }
+  const user = globalThis.__bizzorixFallbackUsers
+    ? { ...values, id: `dev-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }
+    : await User.create(values)
+  if (globalThis.__bizzorixFallbackUsers) globalThis.__bizzorixFallbackUsers.set(user.id, user)
+  else if (user.role === 'business') await Business.create({ ownerId: user.id, name: parsed.data.businessName || `${user.fullName}'s Business`, slug: `${(parsed.data.businessName || user.fullName).toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now().toString().slice(-4)}`, mainCategory: parsed.data.category || 'Other', publicPhone: parsed.data.phone, area: parsed.data.area, serviceAreas: [parsed.data.area].filter(Boolean), serviceTags: [] })
   setAuthCookie(res, user)
   ok(res, safeUser(user), 201)
 }))
 
 app.post('/api/auth/login', asyncRoute(async (req, res) => {
-  const user = await User.findOne({ email: String(req.body.email || '').toLowerCase() }).select('+passwordHash')
+  const email = String(req.body.email || '').toLowerCase()
+  const user = globalThis.__bizzorixFallbackUsers
+    ? [...globalThis.__bizzorixFallbackUsers.values()].find((entry) => entry.email === email)
+    : await User.findOne({ email }).select('+passwordHash')
   if (!user || !(await bcrypt.compare(req.body.password || '', user.passwordHash))) return fail(res, 401, 'Email or password is incorrect.')
   if (user.status !== 'active') return fail(res, 403, 'This account is suspended.')
   setAuthCookie(res, user); ok(res, safeUser(user))
@@ -131,10 +153,128 @@ app.get('/api/businesses/:id/reviews', asyncRoute(async (req, res) => ok(res, aw
 app.get('/api/promotions', asyncRoute(async (_req, res) => ok(res, await Promotion.find({ status: 'active', startDate: { $lte: new Date() }, endDate: { $gte: new Date() } }).populate('businessId', 'name slug logo'))))
 app.post('/api/flags', requireAuth, asyncRoute(async (req, res) => ok(res, await Flag.create({ ...req.body, reporterId: req.user.id }), 201)))
 
-app.get('/api/admin/stats', requireAuth, allowRoles('admin'), asyncRoute(async (_req, res) => ok(res, { users: await User.countDocuments(), customers: await User.countDocuments({ role: 'customer' }), businesses: await Business.countDocuments(), verified: await Business.countDocuments({ verificationStatus: 'verified' }), pending: await Business.countDocuments({ verificationStatus: 'pending' }), openRequests: await CustomerRequest.countDocuments({ status: { $in: ['open', 'matched', 'offers_received'] } }), quotations: await Quotation.countDocuments(), completed: await CustomerRequest.countDocuments({ status: 'completed' }), reviews: await Review.countDocuments(), flags: await Flag.countDocuments({ status: 'open' }) })))
-app.get('/api/admin/businesses', requireAuth, allowRoles('admin'), asyncRoute(async (_req, res) => ok(res, await Business.find().populate('ownerId', 'fullName email').sort({ createdAt: -1 }))))
+const demoRiders = [
+  { id: 'ride-akure-1', name: 'Ade Swift', vehicleType: 'bike', rating: 4.9, trips: 284, successfulDeliveries: 279, area: 'Alagbaka', eta: '8–12 min', arrival: '28–38 min', baseFee: 1800, verified: true, responseRate: 98, cancellationRate: 1.4 },
+  { id: 'ride-akure-2', name: 'Tola Moves', vehicleType: 'car', rating: 4.8, trips: 196, successfulDeliveries: 188, area: 'Akure City Centre', eta: '12–18 min', arrival: '32–45 min', baseFee: 2800, verified: true, responseRate: 96, cancellationRate: 2.1 },
+  { id: 'ride-akure-3', name: 'GreenRoute Van', vehicleType: 'van', rating: 4.7, trips: 121, successfulDeliveries: 116, area: 'Ijapo Estate', eta: '18–25 min', arrival: '45–60 min', baseFee: 4500, verified: true, responseRate: 94, cancellationRate: 2.8 },
+]
+const createTrackingCode = () => `BZX-AKR-${Date.now().toString(36).slice(-5).toUpperCase()}-${randomInt(100, 999)}`
+app.post('/api/orders', requireAuth, allowRoles('customer'), asyncRoute(async (req, res) => {
+  const schema = z.object({ businessName: z.string().min(2).max(120), productName: z.string().min(2).max(160), quantity: z.coerce.number().int().min(1).max(100), notes: z.string().max(500).optional(), image: z.string().url().optional().or(z.literal('')) })
+  const parsed = schema.safeParse(req.body); if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message)
+  const order = { ...parsed.data, trackingCode: createTrackingCode(), customerId: req.user.id, status: 'confirmed', timeline: [{ status: 'confirmed', label: 'Order confirmed by customer', at: new Date() }], deliveryRequested: false }
+  if (globalThis.__bizzorixFallbackUsers) { globalThis.__bizzorixOrders ||= []; order._id = `order-${Date.now()}`; order.createdAt = new Date(); globalThis.__bizzorixOrders.push(order) }
+  else Object.assign(order, (await ProductOrder.create(order)).toObject())
+  ok(res, order, 201)
+}))
+app.get('/api/orders/mine', requireAuth, allowRoles('customer'), asyncRoute(async (req, res) => {
+  if (globalThis.__bizzorixFallbackUsers) return ok(res, (globalThis.__bizzorixOrders || []).filter((entry) => entry.customerId === req.user.id).reverse())
+  ok(res, await ProductOrder.find({ customerId: req.user.id }).sort({ createdAt: -1 }))
+}))
+app.get('/api/orders/track/:code', requireAuth, asyncRoute(async (req, res) => {
+  const code = req.params.code.toUpperCase()
+  let order = globalThis.__bizzorixFallbackUsers ? (globalThis.__bizzorixOrders || []).find((entry) => entry.trackingCode === code) : await ProductOrder.findOne({ trackingCode: code }).lean()
+  if (!order) return fail(res, 404, 'We could not find a product with that tracking code.')
+  if (req.user.role === 'customer' && String(order.customerId) !== req.user.id) return fail(res, 403, 'This tracking code belongs to another customer.')
+  const delivery = globalThis.__bizzorixFallbackUsers ? (globalThis.__bizzorixDeliveries || []).find((entry) => entry.orderTrackingCode === code && entry.customerId === req.user.id) : await DeliveryRequest.findOne({ orderTrackingCode: code, customerId: order.customerId }).lean()
+  ok(res, { order, delivery: delivery || null })
+}))
+app.patch('/api/orders/:code/status', requireAuth, allowRoles('business', 'admin'), asyncRoute(async (req, res) => {
+  const statuses = { confirmed: 'Order confirmed', preparing: 'Business is preparing the product', ready: 'Product ready for pickup', collected: 'Product collected', completed: 'Order completed', cancelled: 'Order cancelled' }
+  if (!statuses[req.body.status]) return fail(res, 400, 'Choose a valid product status.')
+  let order
+  if (globalThis.__bizzorixFallbackUsers) order = (globalThis.__bizzorixOrders || []).find((entry) => entry.trackingCode === req.params.code.toUpperCase())
+  else {
+    const business = req.user.role === 'business' ? await ownsBusiness(req.user.id) : null
+    order = await ProductOrder.findOne({ trackingCode: req.params.code.toUpperCase(), ...(business ? { $or: [{ businessId: business.id }, { businessName: business.name }] } : {}) })
+  }
+  if (!order) return fail(res, 404, 'Order not found for this business.')
+  order.status = req.body.status; order.timeline.push({ status: req.body.status, label: statuses[req.body.status], at: new Date() })
+  if (!globalThis.__bizzorixFallbackUsers) await order.save()
+  ok(res, order)
+}))
+app.get('/api/logistics/riders', (_req, res) => ok(res, demoRiders))
+app.post('/api/logistics/deliveries', requireAuth, allowRoles('customer'), asyncRoute(async (req, res) => {
+  const schema = z.object({ orderTrackingCode: z.string().max(40).optional(), pickupBusiness: z.string().min(2), pickupArea: z.string().min(2), destinationArea: z.string().min(2), destinationNote: z.string().max(250).optional(), itemDescription: z.string().min(3).max(500), recipientName: z.string().min(2), recipientPhone: z.string().min(7).max(20), vehicleType: z.enum(['bike', 'car', 'van']).optional() })
+  const parsed = schema.safeParse(req.body); if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message)
+  const matchingShared = globalThis.__bizzorixFallbackUsers
+    ? (globalThis.__bizzorixDeliveries || []).filter((entry) => entry.pickupArea === parsed.data.pickupArea && entry.destinationArea === parsed.data.destinationArea && ['requested', 'accepted', 'preparing'].includes(entry.status))
+    : await DeliveryRequest.find({ pickupArea: parsed.data.pickupArea, destinationArea: parsed.data.destinationArea, status: { $in: ['requested', 'accepted', 'preparing'] }, createdAt: { $gte: new Date(Date.now() - 2 * 60 * 60 * 1000) } })
+  const participantCount = Math.min(4, matchingShared.length + 1), routeShareEligible = participantCount > 1
+  const offers = demoRiders.map((rider, index) => ({ id: `offer-${Date.now()}-${index}`, dispatcherId: rider.id, dispatcherName: rider.name, vehicleType: rider.vehicleType, deliveryFee: Math.round(rider.baseFee * (routeShareEligible ? .8 : 1)), estimatedPickupTime: rider.eta, estimatedArrivalTime: rider.arrival, rating: rider.rating, completedDeliveries: rider.trips, responseRate: rider.responseRate, cancellationRate: rider.cancellationRate, identityVerified: rider.verified, status: 'sent' }))
+  const delivery = { ...parsed.data, customerId: req.user.id, offers, routeShare: { eligible: routeShareEligible, groupCode: routeShareEligible ? `RS-${parsed.data.pickupArea.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}` : '', participantCount, savings: routeShareEligible ? Math.round(demoRiders[0].baseFee * .2) : 0 }, timeline: [{ status: 'requested', label: 'Order confirmed', at: new Date() }], status: 'requested' }
+  if (globalThis.__bizzorixFallbackUsers) {
+    globalThis.__bizzorixDeliveries ||= []
+    delivery._id = `delivery-${Date.now()}`; delivery.createdAt = new Date(); globalThis.__bizzorixDeliveries.push(delivery)
+  } else {
+    const created = await DeliveryRequest.create(delivery)
+    Object.assign(delivery, created.toObject())
+  }
+  if (parsed.data.orderTrackingCode) {
+    const code = parsed.data.orderTrackingCode.toUpperCase()
+    if (globalThis.__bizzorixFallbackUsers) { const order = (globalThis.__bizzorixOrders || []).find((entry) => entry.trackingCode === code && entry.customerId === req.user.id); if (order) order.deliveryRequested = true }
+    else await ProductOrder.updateOne({ trackingCode: code, customerId: req.user.id }, { deliveryRequested: true })
+  }
+  ok(res, delivery, 201)
+}))
+app.get('/api/logistics/deliveries/mine', requireAuth, allowRoles('customer'), asyncRoute(async (req, res) => {
+  if (globalThis.__bizzorixFallbackUsers) return ok(res, (globalThis.__bizzorixDeliveries || []).filter((entry) => entry.customerId === req.user.id).reverse())
+  ok(res, await DeliveryRequest.find({ customerId: req.user.id }).sort({ createdAt: -1 }))
+}))
+app.post('/api/logistics/deliveries/:id/offers/:offerId/accept', requireAuth, allowRoles('customer'), asyncRoute(async (req, res) => {
+  let delivery
+  if (globalThis.__bizzorixFallbackUsers) delivery = (globalThis.__bizzorixDeliveries || []).find((entry) => entry._id === req.params.id && entry.customerId === req.user.id)
+  else delivery = await DeliveryRequest.findOne({ _id: req.params.id, customerId: req.user.id }).select('+pickupCodeHash +deliveryCodeHash')
+  if (!delivery || delivery.status !== 'requested') return fail(res, 409, 'This delivery is no longer accepting offers.')
+  const offer = delivery.offers.find((entry) => entry.id === req.params.offerId)
+  if (!offer || offer.status !== 'sent') return fail(res, 404, 'This dispatch offer is no longer available.')
+  const pickupCode = String(randomInt(100000, 999999)), deliveryCode = String(randomInt(100000, 999999))
+  delivery.offers.forEach((entry) => { entry.status = entry.id === req.params.offerId ? 'accepted' : 'declined' })
+  Object.assign(delivery, { acceptedOfferId: offer.id, riderId: offer.dispatcherId, riderName: offer.dispatcherName, vehicleType: offer.vehicleType, estimatedFee: offer.deliveryFee, pickupCodeHash: await bcrypt.hash(pickupCode, 10), deliveryCodeHash: await bcrypt.hash(deliveryCode, 10), status: 'accepted' })
+  delivery.timeline.push({ status: 'accepted', label: 'Dispatcher assigned', at: new Date() })
+  if (!globalThis.__bizzorixFallbackUsers) await delivery.save()
+  ok(res, { delivery: { ...(delivery.toObject ? delivery.toObject() : delivery), pickupCodeHash: undefined, deliveryCodeHash: undefined }, dropCodes: { pickupCode, deliveryCode } })
+}))
+app.post('/api/logistics/deliveries/:id/verify-code', requireAuth, asyncRoute(async (req, res) => {
+  const type = req.body.type
+  if (!['pickup', 'delivery'].includes(type)) return fail(res, 400, 'Choose pickup or delivery confirmation.')
+  let delivery = globalThis.__bizzorixFallbackUsers ? (globalThis.__bizzorixDeliveries || []).find((entry) => entry._id === req.params.id && entry.customerId === req.user.id) : await DeliveryRequest.findOne({ _id: req.params.id, customerId: req.user.id }).select('+pickupCodeHash +deliveryCodeHash')
+  if (!delivery) return fail(res, 404, 'Delivery not found.')
+  const valid = await bcrypt.compare(String(req.body.code || ''), type === 'pickup' ? delivery.pickupCodeHash : delivery.deliveryCodeHash)
+  if (!valid) return fail(res, 400, `That ${type} code is incorrect.`)
+  delivery.status = type === 'pickup' ? 'in_transit' : 'delivered'; delivery.timeline.push({ status: delivery.status, label: type === 'pickup' ? 'Picked up · On the way' : 'Delivered', at: new Date() })
+  if (!globalThis.__bizzorixFallbackUsers) await delivery.save()
+  ok(res, delivery)
+}))
+app.post('/api/logistics/deliveries/:id/dispatcher-cancelled', requireAuth, asyncRoute(async (req, res) => {
+  let delivery = globalThis.__bizzorixFallbackUsers ? (globalThis.__bizzorixDeliveries || []).find((entry) => entry._id === req.params.id && entry.customerId === req.user.id) : await DeliveryRequest.findOne({ _id: req.params.id, customerId: req.user.id })
+  if (!delivery || !['accepted', 'preparing'].includes(delivery.status)) return fail(res, 409, 'This dispatcher cannot be replaced now.')
+  const replacement = delivery.offers.find((entry) => !['accepted', 'declined_after_acceptance'].includes(entry.status) && entry.dispatcherId !== delivery.riderId) || demoRiders.find((entry) => entry.id !== delivery.riderId)
+  if (!replacement) return fail(res, 409, 'No replacement is currently available. Your request remains open.')
+  const oldOffer = delivery.offers.find((entry) => entry.dispatcherId === delivery.riderId); if (oldOffer) oldOffer.status = 'cancelled'
+  Object.assign(delivery, { riderId: replacement.dispatcherId || replacement.id, riderName: replacement.dispatcherName || replacement.name, vehicleType: replacement.vehicleType, estimatedFee: replacement.deliveryFee || replacement.baseFee, replacementCount: (delivery.replacementCount || 0) + 1 })
+  delivery.timeline.push({ status: 'accepted', label: `Replacement dispatcher assigned: ${delivery.riderName}`, at: new Date() })
+  if (!globalThis.__bizzorixFallbackUsers) await delivery.save()
+  ok(res, delivery)
+}))
+
+app.get('/api/admin/stats', requireAuth, allowRoles('admin'), asyncRoute(async (_req, res) => {
+  if (globalThis.__bizzorixFallbackUsers) return ok(res, { users: globalThis.__bizzorixFallbackUsers.size, customers: 1, businesses: 8, verified: 5, pending: 1, openRequests: 5, quotations: 5, completed: 1, reviews: 5, flags: 2 })
+  ok(res, { users: await User.countDocuments(), customers: await User.countDocuments({ role: 'customer' }), businesses: await Business.countDocuments(), verified: await Business.countDocuments({ verificationStatus: 'verified' }), pending: await Business.countDocuments({ verificationStatus: 'pending' }), openRequests: await CustomerRequest.countDocuments({ status: { $in: ['open', 'matched', 'offers_received'] } }), quotations: await Quotation.countDocuments(), completed: await CustomerRequest.countDocuments({ status: 'completed' }), reviews: await Review.countDocuments(), flags: await Flag.countDocuments({ status: 'open' }) })
+}))
+app.get('/api/admin/businesses', requireAuth, allowRoles('admin'), asyncRoute(async (_req, res) => ok(res, globalThis.__bizzorixFallbackUsers ? [] : await Business.find().populate('ownerId', 'fullName email').sort({ createdAt: -1 }))))
+app.get('/api/admin/users', requireAuth, allowRoles('admin'), asyncRoute(async (_req, res) => ok(res, globalThis.__bizzorixFallbackUsers ? [...globalThis.__bizzorixFallbackUsers.values()].map(safeUser) : await User.find().select('fullName email role status createdAt').sort({ createdAt: -1 }))))
+app.get('/api/admin/requests', requireAuth, allowRoles('admin'), asyncRoute(async (_req, res) => ok(res, globalThis.__bizzorixFallbackUsers ? [] : await CustomerRequest.find().populate('customerId', 'fullName').sort({ createdAt: -1 }).limit(100))))
+app.get('/api/admin/quotations', requireAuth, allowRoles('admin'), asyncRoute(async (_req, res) => ok(res, globalThis.__bizzorixFallbackUsers ? [] : await Quotation.find().populate('businessId', 'name').populate('requestId', 'title').sort({ createdAt: -1 }).limit(100))))
+app.get('/api/admin/reviews', requireAuth, allowRoles('admin'), asyncRoute(async (_req, res) => ok(res, globalThis.__bizzorixFallbackUsers ? [] : await Review.find().populate('businessId', 'name').populate('customerId', 'fullName').sort({ createdAt: -1 }).limit(100))))
 app.post('/api/admin/businesses/:id/:action', requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => { const map = { verify: 'verified', 'request-changes': 'changes_requested', reject: 'rejected', suspend: 'suspended' }; if (!map[req.params.action]) return fail(res, 404, 'Unknown action.'); const business = await Business.findByIdAndUpdate(req.params.id, { verificationStatus: map[req.params.action], verificationNotes: req.body.reason || '' }, { new: true }); await Notification.create({ userId: business.ownerId, type: 'verification', title: `Verification ${map[req.params.action].replace('_', ' ')}`, body: req.body.reason || 'Your business verification status changed.' }); ok(res, business) }))
-app.get('/api/admin/flags', requireAuth, allowRoles('admin'), asyncRoute(async (_req, res) => ok(res, await Flag.find().sort({ createdAt: -1 }))))
+app.get('/api/admin/flags', requireAuth, allowRoles('admin'), asyncRoute(async (_req, res) => ok(res, globalThis.__bizzorixFallbackUsers ? [] : await Flag.find().sort({ createdAt: -1 }))))
 app.patch('/api/admin/flags/:id', requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => ok(res, await Flag.findByIdAndUpdate(req.params.id, { status: req.body.status, adminNotes: req.body.adminNotes }, { new: true }))))
+app.get('/api/admin/categories', requireAuth, allowRoles('admin'), asyncRoute(async (_req, res) => ok(res, globalThis.__bizzorixFallbackUsers ? [] : await Category.find().sort({ order: 1, name: 1 }))))
+app.post('/api/admin/categories', requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => ok(res, await Category.create({ name: req.body.name, slug: String(req.body.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-'), active: true }), 201)))
+app.patch('/api/admin/categories/:id', requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => ok(res, await Category.findByIdAndUpdate(req.params.id, { name: req.body.name, active: req.body.active }, { new: true, runValidators: true }))))
+app.get('/api/admin/areas', requireAuth, allowRoles('admin'), asyncRoute(async (_req, res) => ok(res, globalThis.__bizzorixFallbackUsers ? [] : await Area.find().sort({ name: 1 }))))
+app.post('/api/admin/areas', requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => ok(res, await Area.create({ name: req.body.name, slug: String(req.body.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-'), active: true }), 201)))
+app.patch('/api/admin/areas/:id', requireAuth, allowRoles('admin'), asyncRoute(async (req, res) => ok(res, await Area.findByIdAndUpdate(req.params.id, { name: req.body.name, active: req.body.active }, { new: true, runValidators: true }))))
 
 app.use((err, _req, res, _next) => { if (process.env.NODE_ENV !== 'test') console.error(err.message); fail(res, err.name === 'ValidationError' ? 400 : 500, err.name === 'ValidationError' ? err.message : 'Something went wrong. Please try again.') })

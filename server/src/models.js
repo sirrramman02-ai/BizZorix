@@ -67,6 +67,32 @@ savedSchema.index({ customerId: 1, businessId: 1 }, { unique: true })
 const promotionSchema = new Schema({ businessId: { type: Schema.Types.ObjectId, ref: 'Business' }, title: String, description: String, image: String, startDate: Date, endDate: Date, status: { type: String, default: 'active' }, isFeatured: { type: Boolean, default: false } }, options)
 const referenceSchema = new Schema({ name: { type: String, required: true, unique: true }, slug: String, icon: String, active: { type: Boolean, default: true }, order: Number }, options)
 const flagSchema = new Schema({ reporterId: { type: Schema.Types.ObjectId, ref: 'User' }, targetType: String, targetId: Schema.Types.ObjectId, reason: String, details: String, status: { type: String, default: 'open' }, adminNotes: String }, options)
+const deliveryRequestSchema = new Schema({
+  customerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  riderId: String, riderName: String,
+  orderTrackingCode: String, pickupBusiness: { type: String, required: true }, pickupArea: { type: String, required: true },
+  destinationArea: { type: String, required: true }, destinationNote: String,
+  itemDescription: { type: String, required: true, maxlength: 500 }, recipientName: String,
+  recipientPhone: String, vehicleType: { type: String, enum: ['bike', 'car', 'van'], default: 'bike' },
+  estimatedFee: Number,
+  offers: [{ id: String, dispatcherId: String, dispatcherName: String, vehicleType: String, deliveryFee: Number, estimatedPickupTime: String, estimatedArrivalTime: String, rating: Number, completedDeliveries: Number, responseRate: Number, cancellationRate: Number, identityVerified: Boolean, status: { type: String, default: 'sent' } }],
+  acceptedOfferId: String,
+  pickupCodeHash: { type: String, select: false }, deliveryCodeHash: { type: String, select: false },
+  routeShare: { eligible: Boolean, groupCode: String, participantCount: Number, savings: Number },
+  timeline: [{ status: String, label: String, at: Date }], replacementCount: { type: Number, default: 0 },
+  status: { type: String, enum: ['requested', 'accepted', 'preparing', 'picking_up', 'in_transit', 'delivered', 'cancelled'], default: 'requested' },
+}, options)
+deliveryRequestSchema.index({ pickupArea: 1, destinationArea: 1, status: 1, createdAt: -1 })
+deliveryRequestSchema.index({ orderTrackingCode: 1 })
+const productOrderSchema = new Schema({
+  trackingCode: { type: String, required: true, unique: true, uppercase: true },
+  customerId: { type: Schema.Types.ObjectId, ref: 'User', required: true }, businessId: { type: Schema.Types.ObjectId, ref: 'Business' },
+  businessName: { type: String, required: true }, productName: { type: String, required: true }, quantity: { type: Number, min: 1, default: 1 },
+  image: String, notes: String,
+  status: { type: String, enum: ['confirmed', 'preparing', 'ready', 'collected', 'completed', 'cancelled'], default: 'confirmed' },
+  timeline: [{ status: String, label: String, at: Date }], deliveryRequested: { type: Boolean, default: false },
+}, options)
+productOrderSchema.index({ customerId: 1, createdAt: -1 })
 
 export const User = model('User', userSchema)
 export const Business = model('Business', businessSchema)
@@ -83,3 +109,5 @@ export const Promotion = model('Promotion', promotionSchema)
 export const Category = model('Category', referenceSchema)
 export const Area = model('Area', referenceSchema)
 export const Flag = model('Flag', flagSchema)
+export const DeliveryRequest = model('DeliveryRequest', deliveryRequestSchema)
+export const ProductOrder = model('ProductOrder', productOrderSchema)

@@ -12,6 +12,9 @@ The memorable flow is: **post what you need → match with local businesses → 
 - Matched-request workspace, real quotations, offer comparison and transactional acceptance
 - Request-specific conversations, notifications, completion and verified reviews
 - Business profile management, dashboard metrics and verification submission
+- Akure Guide Map with business markers, optional consent-based location and external turn-by-turn directions
+- BizZorix Move logistics hub with dispatch quotation comparison, verified trust profiles, RouteShare savings, private Pickup/Delivery DropCodes, automatic dispatcher replacement, and low-data tracking
+- Unified `BZX-AKR-…` product tracking codes that combine business preparation and optional delivery progress in one customer view
 - Admin statistics, verification queue, moderation models, categories and Akure areas
 - Realistic fictional Akure demo businesses, services, requests, matches, offers, promotions, messages, and reviews
 - Responsive layouts for phone, tablet and desktop
@@ -35,19 +38,18 @@ server/src/           Express API
 
 ## Run locally
 
-You need Node.js 20+ and a local MongoDB server. MongoDB Compass is optional; it is only a visual database browser.
+You need Node.js 20+. A local MongoDB server is recommended but no longer required for authentication development. When MongoDB is unavailable, BizZorix first tries a temporary development database. On older CPUs that cannot run it, the API automatically uses compatibility authentication mode so registration, login and sessions still work. Accounts in compatibility mode reset whenever the API restarts. Full request persistence requires MongoDB. MongoDB Compass is optional; it is only a visual database browser.
 
 1. Copy `.env.example` to `.env` and replace `JWT_SECRET` with a long random value.
-2. Make sure MongoDB is running at `mongodb://127.0.0.1:27017` (or change `MONGODB_URI`).
+2. For persistent data, run MongoDB and keep the provided `MONGODB_URI`. For the automatic temporary development database, remove or comment out `MONGODB_URI` in `.env`.
 3. From the repository root, run:
 
 ```bash
 npm install
-npm run seed
 npm run dev
 ```
 
-The website opens at `http://localhost:5173`; the API runs at `http://localhost:5000`. Vite forwards `/api` calls to the API automatically.
+The website opens at `http://localhost:5173`; the API runs at `http://localhost:5000`. Vite forwards `/api` calls to the API automatically. Run `npm run seed` separately only when using persistent MongoDB.
 
 ## Demo accounts
 
@@ -73,6 +75,14 @@ npm start         # production API process
 
 Matches are calculated rather than hard-coded. An exact category contributes 35 points, keyword overlap up to 30, the same area 20, a served area 10, and current request availability 5. Only matches scoring 45 or higher are saved, and the reasons are stored for both dashboards.
 
+## Delivery safety
+
+Dispatch offers show the fee, pickup/arrival estimate, rating, completed deliveries, identity verification, response rate, and cancellation rate. After accepting an offer, the API generates separate six-digit Pickup and Delivery DropCodes and stores only bcrypt hashes. The pickup code confirms collection of the correct item; the recipient keeps the delivery code private until the item has been received and checked. Normal delivery queries never return either code or hash.
+
+RouteShare detects recent open deliveries with the same pickup and destination areas and can apply a shared-route saving. If an assigned dispatcher cancels before pickup, the replacement endpoint selects the next suitable offer while preserving the delivery request and timeline.
+
+Each recorded product arrangement receives a unique `BZX-AKR-…` tracking code. The business-side status covers confirmation, preparation, ready-for-pickup and collection. If the customer requests BizZorix Move using that code, the same tracking screen adds dispatcher assignment, pickup, in-transit and delivery milestones. Tracking requires the connected customer account; knowing another customer’s code is not enough to access their order.
+
 ## Images and optional services
 
 The demo uses optimized remote photography and does not require a storage or AI key. Database image fields accept URLs. A production deployment should connect the existing image fields to private/public Cloudinary upload endpoints before allowing untrusted uploads. Verification documents should always use private authenticated storage.
@@ -85,4 +95,4 @@ Passwords are bcrypt-hashed and never returned. JWTs use HTTP-only cookies. The 
 
 ## MVP limitations and future work
 
-This MVP deliberately excludes online payments, escrow, delivery logistics, paid advertising, compulsory GPS and national expansion. Likely future work includes Cloudinary upload completion, email/push notification delivery, payments, delivery partners, richer analytics and support for more Nigerian cities.
+This MVP deliberately excludes online payments, escrow, paid advertising, compulsory GPS and national expansion. Logistics requests coordinate a local delivery partner but do not yet include live driver telemetry, automatic dispatch or online delivery payment. Likely future work includes Cloudinary uploads, push notifications, payments, vetted partner onboarding, live tracking, richer analytics and support for more Nigerian cities.
