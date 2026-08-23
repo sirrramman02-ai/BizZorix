@@ -71,6 +71,34 @@ npm run build     # production client build
 npm start         # production API process
 ```
 
+## Deploying to Vercel
+
+The repository includes `vercel.json` and `api/index.js`. Vercel builds the Vite client and runs the Express API as one Vercel Function. Authentication in production must use a persistent MongoDB database; the local compatibility store cannot be used because serverless instances are temporary.
+
+In Vercel, open **Project → Settings → Environment Variables** and add these values to Production (and Preview if you use preview deployments):
+
+```text
+MONGODB_URI=mongodb+srv://...your MongoDB Atlas connection string...
+JWT_SECRET=a-long-random-production-secret
+CLIENT_URL=https://your-production-domain.vercel.app
+ENABLE_DEMO_ACCOUNTS=true
+DEMO_ACCOUNT_PASSWORD=Demo1234!
+```
+
+For MongoDB Atlas, allow connections from Vercel and create a database user with access to the BizZorix database. Do not place the connection string in frontend code or commit it to Git.
+
+`ENABLE_DEMO_ACCOUNTS=true` non-destructively creates the three documented demo users when the API first connects. Existing accounts are not overwritten. Set it to `false` after the competition if public demo logins are no longer wanted.
+
+After adding or changing Vercel environment variables, redeploy the project; environment changes do not affect an already-built deployment.
+
+Verify the API after deployment by opening:
+
+```text
+https://your-domain.vercel.app/api/categories
+```
+
+You should receive JSON rather than the React application or a 404 page.
+
 ## Matching logic
 
 Matches are calculated rather than hard-coded. An exact category contributes 35 points, keyword overlap up to 30, the same area 20, a served area 10, and current request availability 5. Only matches scoring 45 or higher are saved, and the reasons are stored for both dashboards.

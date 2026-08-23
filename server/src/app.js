@@ -16,6 +16,8 @@ const allowedOrigins = new Set([
   process.env.CLIENT_URL || 'http://localhost:5173',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '',
+  process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : '',
 ])
 app.use(cors({
   origin(origin, callback) {
