@@ -1,0 +1,145 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: #f7f8fc;
+  background: #090b10;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+a {
+  font: inherit;
+}
+
+.app-shell {
+  position: relative;
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  overflow: hidden;
+  padding: 2rem;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(124, 92, 255, 0.22), transparent 32rem),
+    radial-gradient(circle at 88% 82%, rgba(43, 203, 186, 0.16), transparent 28rem),
+    #090b10;
+}
+
+.app-shell::before {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 48px 48px;
+  content: '';
+  mask-image: linear-gradient(to bottom, black, transparent 85%);
+}
+
+.hero {
+  position: relative;
+  max-width: 760px;
+  padding: clamp(2rem, 7vw, 5rem);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 28px;
+  background: rgba(15, 18, 26, 0.78);
+  box-shadow: 0 32px 100px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(18px);
+}
+
+.eyebrow {
+  display: inline-block;
+  margin-bottom: 1.5rem;
+  color: #a996ff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+h1 {
+  max-width: 650px;
+  margin: 0;
+  font-size: clamp(3rem, 9vw, 6rem);
+  line-height: 0.96;
+  letter-spacing: -0.065em;
+}
+
+.intro {
+  max-width: 570px;
+  margin: 2rem 0 0;
+  color: #a9adba;
+  font-size: clamp(1rem, 2vw, 1.15rem);
+  line-height: 1.7;
+}
+
+code {
+  color: #d1c8ff;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 2.5rem;
+}
+
+button,
+.actions a {
+  padding: 0.85rem 1.2rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+button {
+  border: 0;
+  color: #0d0e12;
+  background: #f6f7fb;
+  cursor: pointer;
+  transition: transform 160ms ease, background 160ms ease;
+}
+
+button:hover {
+  background: #dcd6ff;
+  transform: translateY(-2px);
+}
+
+.actions a {
+  color: #f7f8fc;
+  text-decoration: none;
+}
+
+.actions a:hover {
+  color: #b9aaff;
+}
+
+@media (max-width: 520px) {
+  .app-shell {
+    padding: 1rem;
+  }
+
+  .hero {
+    padding: 2rem 1.5rem;
+    border-radius: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}
