@@ -87,17 +87,17 @@ DEMO_ACCOUNT_PASSWORD=Demo1234!
 
 For MongoDB Atlas, allow connections from Vercel and create a database user with access to the BizZorix database. Do not place the connection string in frontend code or commit it to Git.
 
-`ENABLE_DEMO_ACCOUNTS=true` non-destructively creates the three documented demo users when the API first connects. Existing accounts are not overwritten. Set it to `false` after the competition if public demo logins are no longer wanted.
+`ENABLE_DEMO_ACCOUNTS=true` non-destructively creates the three documented demo users when the API connects to MongoDB. Existing accounts are not overwritten. If MongoDB is absent or temporarily unreachable, the Vercel function automatically provides stateless demo authentication so the documented demo accounts can still log in. Data created in stateless mode can reset between requests; connect MongoDB for persistent registrations and workflows. Set `ENABLE_DEMO_ACCOUNTS=false` after the competition to disable all public demo access.
 
 After adding or changing Vercel environment variables, redeploy the project; environment changes do not affect an already-built deployment.
 
 Verify the API after deployment by opening:
 
 ```text
-https://your-domain.vercel.app/api/categories
+https://your-domain.vercel.app/api/health
 ```
 
-You should receive JSON rather than the React application or a 404 page.
+You should receive JSON rather than the React application or a 404 page. The `runtime` field will be `mongodb` for full persistence or `stateless-demo` when the deployment is providing demo login without a database.
 
 ## Matching logic
 

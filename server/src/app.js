@@ -1,4 +1,5 @@
 import express from 'express'
+import mongoose from 'mongoose'
 import helmet from 'helmet'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
@@ -35,6 +36,13 @@ const fail = (res, status, message) => res.status(status).json({ success: false,
 const pageMeta = (page, limit, total) => ({ page, limit, total, pages: Math.ceil(total / limit) })
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
 const ownsBusiness = async (userId) => Business.findOne({ ownerId: userId })
+
+app.get('/api/health', (_req, res) => ok(res, {
+  status: 'ok',
+  runtime: globalThis.__bizzorixRuntimeMode || (mongoose.connection.readyState === 1 ? 'mongodb' : 'local'),
+  databaseConnected: mongoose.connection.readyState === 1,
+  demoAccountsEnabled: Boolean(globalThis.__bizzorixFallbackUsers) || process.env.ENABLE_DEMO_ACCOUNTS !== 'false',
+}))
 
 const registerSchema = z.object({ fullName: z.string().min(2), email: z.string().email(), password: z.string().min(8), phone: z.string().optional(), preferredArea: z.string().optional(), businessName: z.string().optional(), category: z.string().optional(), area: z.string().optional() })
 
